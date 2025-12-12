@@ -16,12 +16,17 @@ try
     shift_range = embed_info.shift_range;
     secret_length = embed_info.secret_length;
     embedded_locations = embed_info.embedded_locations;
+    if isfield(embed_info, 'actual_embedded')
+        secret_length = embed_info.actual_embedded;
+    end
     
     % Chuyển về grayscale nếu cần
     if is_color
-        gray_watermarked = watermarked_img(:,:,1);
+        ycbcr_img = rgb2ycbcr(watermarked_img);
+        gray_watermarked = ycbcr_img(:,:,1);
     else
         gray_watermarked = watermarked_img;
+        ycbcr_img = [];
     end
     
     % Chuyển về double
@@ -38,74 +43,29 @@ try
     for k = 1:size(embedded_locations, 1)
         i = embedded_locations(k, 1);
         j = embedded_locations(k, 2);
-        embedded_bit = embedded_locations(k, 3);
-        
+
         pixel_val = gray_watermarked(i, j);
-        
-        if embedded_bit == 1
-            % Pixel đã được chuyển sang zero_point direction
-            extracted_data = [extracted_data, 1];
-            recovered_gray(i, j) = peak_point;
+
+        % Suy ra bit dựa trên hướng shift
+        if shift_direction == 1
+            bit_val = pixel_val ~= peak_point; % 1 nếu đã dịch sang phải (>= peak+1)
         else
-            % Pixel vẫn ở peak_point
-            extracted_data = [extracted_data, 0];
-            recovered_gray(i, j) = peak_point;
+            bit_val = pixel_val ~= peak_point; % 1 nếu đã dịch sang trái (<= peak-1)
         end
+
+        extracted_data = [extracted_data, bit_val];
+        recovered_gray(i, j) = peak_point; % khôi phục về peak gốc
     end
     
-    % Bước 2: Khôi phục histogram bằng cách shift ngược lại (sử dụng pre_shift_range)
-    if isfield(embed_info, 'pre_shift_range') && ~isempty(embed_info.pre_shift_range)
-        pre_shift_range = embed_info.pre_shift_range;
-        
-        for i = 1:rows
-            for j = 1:cols
-                pixel_val = recovered_gray(i, j);
-                
-                % Kiểm tra pixel có bị pre-shift không và shift ngược lại
-                if shift_direction == 1
-                    % Đã shift sang phải, shift ngược về trái
-                    if pixel_val >= pre_shift_range(1) + 1 && pixel_val <= pre_shift_range(2) + 1
-                        % Kiểm tra xem có phải pixel đã embed không
-                        is_embedded = false;
-                        for k = 1:size(embedded_locations, 1)
-                            if embedded_locations(k, 1) == i && embedded_locations(k, 2) == j
-                                is_embedded = true;
-                                break;
-                            end
-                        end
-                        
-                        if ~is_embedded
-                            recovered_gray(i, j) = pixel_val - 1;
-                        end
-                    end
-                else
-                    % Đã shift sang trái, shift ngược về phải  
-                    if pixel_val >= pre_shift_range(1) - 1 && pixel_val <= pre_shift_range(2) - 1
-                        % Kiểm tra xem có phải pixel đã embed không
-                        is_embedded = false;
-                        for k = 1:size(embedded_locations, 1)
-                            if embedded_locations(k, 1) == i && embedded_locations(k, 2) == j
-                                is_embedded = true;
-                                break;
-                            end
-                        end
-                        
-                        if ~is_embedded
-                            recovered_gray(i, j) = pixel_val + 1;
-                        end
-                    end
-                end
-            end
-        end
-    end
+    % Không cần bước khôi phục pre-shift vì embed đã bỏ qua pre-shift để thuận nghịch tuyệt đối
     
     % Chuyển về uint8
     recovered_gray = uint8(round(recovered_gray));
     
     % Tạo ảnh kết quả cuối cùng
     if is_color
-        recovered_img = embed_info.color_img;
-        recovered_img(:,:,1) = recovered_gray;
+        ycbcr_img(:,:,1) = recovered_gray;
+        recovered_img = ycbcr2rgb(ycbcr_img);
     else
         recovered_img = recovered_gray;
     end
@@ -130,4 +90,3 @@ catch err
     error('Lỗi trong quá trình extract HS: %s', err.message);
 end
 end
-

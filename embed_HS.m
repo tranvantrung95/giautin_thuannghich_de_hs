@@ -8,15 +8,15 @@ function [watermarked_img, embed_info] = embed_HS(original_img, secret_bits)
 %   embed_info: Thông tin cần thiết để trích xuất
 
 try
-    % Chuyển về grayscale nếu cần
-    if size(original_img, 3) == 3
-        gray_img = rgb2gray(original_img);
+    % Chuyển về grayscale hoặc kênh Y nếu là ảnh màu để không phải lưu lại ảnh gốc
+    if ndims(original_img) == 3
         is_color = true;
-        color_img = original_img;
+        ycbcr_img = rgb2ycbcr(original_img);
+        gray_img = ycbcr_img(:,:,1); % chỉ thao tác trên kênh sáng Y
     else
-        gray_img = original_img;
         is_color = false;
-        color_img = [];
+        gray_img = original_img;
+        ycbcr_img = [];
     end
     
     % Chuyển về double
@@ -90,21 +90,16 @@ try
         shift_range = [zero_point + 1, peak_point - 1];
     end
     
-    % Khởi tạo embed info
+    % Khởi tạo embed info (chỉ giữ thông tin tối thiểu, không giữ ảnh gốc hay dữ liệu bí mật)
     embed_info = struct();
     embed_info.is_color = is_color;
-    embed_info.color_img = color_img;
     embed_info.peak_point = peak_point;
     embed_info.zero_point = zero_point;
     embed_info.shift_direction = shift_direction;
     embed_info.shift_range = shift_range;
-    if exist('pre_shift_range', 'var')
-        embed_info.pre_shift_range = pre_shift_range;
-    else
-        embed_info.pre_shift_range = [];
-    end
     embed_info.secret_length = length(secret_bits);
     embed_info.embedded_locations = [];
+    embed_info.pre_shift_range = [];
     
     % Chuyển secret_bits thành số
     secret_data = zeros(length(secret_bits), 1);
@@ -112,25 +107,9 @@ try
         secret_data(i) = str2double(secret_bits(i));
     end
     
-    % Bước 1: Pre-shift chỉ những pixels gần zero point (giảm thiểu ảnh hưởng)
+    % Bước 1: (Đơn giản hóa) Không pre-shift để đảm bảo tính thuận nghịch tuyệt đối
     watermarked_gray = gray_img;
-    pre_shift_range = [min(peak_point, zero_point) + floor(abs(peak_point - zero_point) * 0.8), ...
-                       max(peak_point, zero_point) - 1]; % Chỉ shift 20% cuối của range
-    
-    if pre_shift_range(1) <= pre_shift_range(2)
-        for i = 1:rows
-            for j = 1:cols
-                pixel_val = gray_img(i, j);
-                
-                % Chỉ shift pixels gần zero point
-                if shift_direction == 1 && pixel_val >= pre_shift_range(1) && pixel_val <= pre_shift_range(2)
-                    watermarked_gray(i, j) = pixel_val + 1;
-                elseif shift_direction == -1 && pixel_val >= pre_shift_range(1) && pixel_val <= pre_shift_range(2)
-                    watermarked_gray(i, j) = pixel_val - 1;
-                end
-            end
-        end
-    end
+    embed_info.pre_shift_range = [];
     
     % Bước 2: Embed dữ liệu vào peak point (với giới hạn)
     bit_idx = 1;
@@ -138,8 +117,12 @@ try
     embedded_count = 0;
     % Ưu tiên secret_data length nhưng có giới hạn an toàn
     needed_pixels = length(secret_data);
-    safe_max_pixels = max_freq * 0.3; % Tối đa 30% peak pixels
+    safe_max_pixels = max_freq; % Cho phép dùng toàn bộ peak pixels để đảm bảo đủ dung lượng
     max_embed_pixels = min(needed_pixels, safe_max_pixels);
+
+    if max_embed_pixels < needed_pixels
+        error('Dung lượng không đủ để giấu toàn bộ dữ liệu (%d/%d bit khả dụng).', max_embed_pixels, needed_pixels);
+    end
     
     for i = 1:rows
         for j = 1:cols
@@ -149,7 +132,7 @@ try
             
             if gray_img(i, j) == peak_point
                 secret_bit = secret_data(bit_idx);
-                
+
                 if secret_bit == 1
                     % Embed bit 1: chuyển pixel sang zero_point direction
                     if shift_direction == 1
@@ -157,13 +140,12 @@ try
                     else
                         watermarked_gray(i, j) = peak_point - 1;
                     end
-                    embedded_locations = [embedded_locations; i, j, 1];
                 else
                     % Embed bit 0: giữ nguyên tại peak_point
                     watermarked_gray(i, j) = peak_point;
-                    embedded_locations = [embedded_locations; i, j, 0];
                 end
-                
+
+                embedded_locations = [embedded_locations; i, j];
                 bit_idx = bit_idx + 1;
                 embedded_count = embedded_count + 1;
             end
@@ -189,8 +171,8 @@ try
     
     % Tạo ảnh kết quả cuối cùng
     if is_color
-        watermarked_img = color_img;
-        watermarked_img(:,:,1) = watermarked_gray;
+        ycbcr_img(:,:,1) = watermarked_gray;
+        watermarked_img = ycbcr2rgb(ycbcr_img);
     else
         watermarked_img = watermarked_gray;
     end
@@ -213,4 +195,3 @@ catch err
     error('Lỗi trong quá trình embed HS: %s', err.message);
 end
 end
-

@@ -12,6 +12,7 @@ fig = figure('Visible', 'off', ...
              'MenuBar', 'none', ...
              'ToolBar', 'none', ...
              'Resize', 'off', ...
+             'Color', [0.97 0.97 0.98], ...
              'CloseRequestFcn', @closeGUI);
 
 % Khởi tạo handles
@@ -139,6 +140,51 @@ set(fig, 'Visible', 'on');
         set(gcf, 'UserData', handles);
     end
 
+    function updateMatrixTable(table_handle, img, focus_rc)
+        if isempty(table_handle) || ~ishandle(table_handle)
+            return;
+        end
+        if isempty(img)
+            set(table_handle, 'Data', []);
+            set(table_handle, 'RowName', {});
+            set(table_handle, 'ColumnName', {});
+            return;
+        end
+
+        if nargin < 3 || isempty(focus_rc)
+            focus_rc = [1, 1];
+        end
+
+        gray_img = getLumaChannel(img);
+        gray_img = double(gray_img);
+        r = min(10, size(gray_img, 1));
+        c = min(10, size(gray_img, 2));
+
+        % Cắt 10x10 từ vùng focus (nếu focus gần biên thì dịch về trong ảnh)
+        start_r = max(1, min(focus_rc(1), size(gray_img,1) - r + 1));
+        start_c = max(1, min(focus_rc(2), size(gray_img,2) - c + 1));
+        preview = gray_img(start_r:start_r+r-1, start_c:start_c+c-1);
+
+        set(table_handle, 'Data', round(preview));
+        set(table_handle, 'RowName', arrayfun(@(x) num2str(start_r + x - 1), 1:r, 'UniformOutput', false));
+        set(table_handle, 'ColumnName', arrayfun(@(x) num2str(start_c + x - 1), 1:c, 'UniformOutput', false));
+    end
+
+    function gray = getLumaChannel(img)
+        if ndims(img) == 3
+            ycbcr_img = rgb2ycbcr(img);
+            gray = ycbcr_img(:,:,1);
+        else
+            gray = img;
+        end
+    end
+
+    function updateChangeText(handles, value)
+        if isfield(handles, 'embed_change_text') && isgraphics(handles.embed_change_text)
+            set(handles.embed_change_text, 'String', sprintf('Pixel thay đổi: %s', value));
+        end
+    end
+
     function handles = createTab1Content(parent, handles)
         % TAB 1: EMBEDDING
         
@@ -260,11 +306,56 @@ set(fig, 'Visible', 'on');
                   'Callback', @embed_saveEmbedInfo);
         
         % Info display
+        % Matrix preview panel
+        matrix_panel = uipanel('Parent', parent, ...
+                              'Title', 'Ma trận (preview 10x10)', ...
+                              'FontSize', 12, ...
+                              'FontWeight', 'bold', ...
+                              'Units', 'normalized', ...
+                              'Position', [0.02 0.02 0.46 0.48]);
+
+        handles.embed_change_text = uicontrol('Parent', matrix_panel, ...
+                                             'Style', 'text', ...
+                                             'String', 'Pixel thay đổi: -', ...
+                                             'Units', 'normalized', ...
+                                             'Position', [0.02 0.9 0.96 0.08], ...
+                                             'HorizontalAlignment', 'left', ...
+                                             'FontSize', 10, ...
+                                             'FontWeight', 'bold');
+
+        uicontrol('Parent', matrix_panel, ...
+                  'Style', 'text', ...
+                  'String', 'Ảnh gốc (kênh sáng/gray)', ...
+                  'Units', 'normalized', ...
+                  'Position', [0.02 0.8 0.46 0.1], ...
+                  'HorizontalAlignment', 'left', ...
+                  'FontSize', 10, ...
+                  'FontWeight', 'bold');
+
+        handles.embed_matrix_original_table = uitable('Parent', matrix_panel, ...
+                                                     'Units', 'normalized', ...
+                                                     'Position', [0.02 0.05 0.46 0.8], ...
+                                                     'FontSize', 9);
+
+        uicontrol('Parent', matrix_panel, ...
+                  'Style', 'text', ...
+                  'String', 'Ảnh sau giấu tin', ...
+                  'Units', 'normalized', ...
+                  'Position', [0.52 0.8 0.46 0.1], ...
+                  'HorizontalAlignment', 'left', ...
+                  'FontSize', 10, ...
+                  'FontWeight', 'bold');
+
+        handles.embed_matrix_watermarked_table = uitable('Parent', matrix_panel, ...
+                                                        'Units', 'normalized', ...
+                                                        'Position', [0.52 0.05 0.46 0.8], ...
+                                                        'FontSize', 9);
+
         handles.embed_info_text = uicontrol('Parent', parent, ...
                                            'Style', 'text', ...
                                            'String', '🔒 TAB 1 - GIẤU TIN\n\n📋 HƯỚNG DẪN:\n1. Nạp ảnh gốc (hoặc dùng ảnh Demo)\n2. Nhập dữ liệu bí mật cần giấu\n3. Chọn thuật toán (HS khuyến nghị)\n4. Nhấn "THỰC HIỆN GIẤU TIN"\n5. ⚠️ QUAN TRỌNG: Lưu cả 2 file:\n   • "Lưu ảnh đã giấu tin" → gửi công khai\n   • "Lưu thông tin embed" → giữ bí mật\n\n🔐 LOGIC BẢO MẬT:\n• Ảnh đã giấu tin: Có thể chia sẻ thoải mái\n• File embed: Là "chìa khóa" - phải bảo vệ!', ...
                                            'Units', 'normalized', ...
-                                           'Position', [0.02 0.02 0.96 0.48], ...
+                                           'Position', [0.5 0.02 0.48 0.48], ...
                                            'HorizontalAlignment', 'left', ...
                                            'BackgroundColor', [0.95 0.95 1], ...
                                            'FontSize', 9);
@@ -494,6 +585,9 @@ set(fig, 'Visible', 'on');
                 axes(handles.embed_axes_original);
                 imshow(handles.embed_data.original_image);
                 title('Ảnh gốc');
+                updateMatrixTable(handles.embed_matrix_original_table, handles.embed_data.original_image, [1 1]);
+                updateMatrixTable(handles.embed_matrix_watermarked_table, [], []);
+                updateChangeText(handles, '-');
                 
                 set(handles.embed_info_text, 'String', sprintf('Đã nạp ảnh: %s\nKích thước: %dx%d', ...
                     filename, size(handles.embed_data.original_image, 2), size(handles.embed_data.original_image, 1)));
@@ -513,6 +607,9 @@ set(fig, 'Visible', 'on');
             axes(handles.embed_axes_original);
             imshow(handles.embed_data.original_image);
             title('Ảnh demo');
+            updateMatrixTable(handles.embed_matrix_original_table, handles.embed_data.original_image, [1 1]);
+            updateMatrixTable(handles.embed_matrix_watermarked_table, [], []);
+            updateChangeText(handles, '-');
             
             set(handles.embed_info_text, 'String', 'Đã nạp ảnh demo thành công!');
         catch err
@@ -541,6 +638,7 @@ set(fig, 'Visible', 'on');
             
             % Convert text to binary
             secret_bits = text_to_binary(secret_text);
+            secret_bit_length = length(secret_bits);
             
             % Choose algorithm
             algorithm_idx = get(handles.embed_algorithm_popup, 'Value');
@@ -558,6 +656,8 @@ set(fig, 'Visible', 'on');
             axes(handles.embed_axes_watermarked);
             imshow(handles.embed_data.watermarked_image);
             title('Ảnh đã giấu tin');
+            updateMatrixTable(handles.embed_matrix_watermarked_table, handles.embed_data.watermarked_image);
+            updateMatrixTable(handles.embed_matrix_original_table, handles.embed_data.original_image);
             
             % Calculate PSNR
             psnr_value = calculate_psnr(handles.embed_data.original_image, handles.embed_data.watermarked_image);
@@ -567,9 +667,42 @@ set(fig, 'Visible', 'on');
             handles.embed_data.algorithm = algorithm_name;
             handles.embed_data.psnr = psnr_value;
             
-            set(handles.embed_info_text, 'String', sprintf('Giấu tin thành công!\nThuật toán: %s\nPSNR: %.2f dB\nBạn có thể lưu ảnh và thông tin embed.', ...
-                algorithm_name, psnr_value));
-            
+            % Tính số pixel thay đổi dựa trên vị trí embed (chính xác với HS/DE)
+            if isfield(handles.embed_data, 'embed_info') && isfield(handles.embed_data.embed_info, 'embedded_locations')
+                changed_pixels = size(handles.embed_data.embed_info.embedded_locations, 1);
+                if changed_pixels > 0
+                    focus_rc = handles.embed_data.embed_info.embedded_locations(1, 1:2);
+                else
+                    focus_rc = [1, 1];
+                end
+            elseif isfield(handles.embed_data, 'embed_info') && isfield(handles.embed_data.embed_info, 'locations')
+                changed_pixels = size(handles.embed_data.embed_info.locations, 1) * 2; % mỗi cặp 2 pixel thay đổi
+                if changed_pixels > 0
+                    focus_rc = handles.embed_data.embed_info.locations(1, 1:2);
+                else
+                    focus_rc = [1, 1];
+                end
+            else
+                % Fallback tính trực tiếp từ ảnh
+                orig_gray = getLumaChannel(handles.embed_data.original_image);
+                wm_gray = getLumaChannel(handles.embed_data.watermarked_image);
+                changed_mask = orig_gray ~= wm_gray;
+                changed_pixels = nnz(changed_mask);
+                if changed_pixels > 0
+                    [first_r, first_c] = find(changed_mask, 1, 'first');
+                    focus_rc = [first_r, first_c];
+                else
+                    focus_rc = [1, 1];
+                end
+            end
+
+            updateMatrixTable(handles.embed_matrix_watermarked_table, handles.embed_data.watermarked_image, focus_rc);
+            updateMatrixTable(handles.embed_matrix_original_table, handles.embed_data.original_image, focus_rc);
+            updateChangeText(handles, num2str(changed_pixels));
+
+            set(handles.embed_info_text, 'String', sprintf('Giấu tin thành công!\nThuật toán: %s\nDữ liệu: %d bit\nPSNR: %.2f dB\nPixel thay đổi: %d\nBạn có thể lưu ảnh và thông tin embed.', ...
+                algorithm_name, secret_bit_length, psnr_value, changed_pixels));
+
         catch err
             set(handles.embed_info_text, 'String', sprintf('Lỗi giấu tin: %s', err.message));
         end
